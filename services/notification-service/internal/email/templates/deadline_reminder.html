@@ -1,0 +1,15 @@
+<!DOCTYPE html>
+<html>
+<body style="font-family:Arial,sans-serif;color:#1a1a1a;max-width:600px;margin:0 auto;padding:32px">
+  <div style="border-bottom:3px solid #e65100;padding-bottom:16px;margin-bottom:24px">
+    <h2 style="color:#e65100;margin:0">Action Due Soon</h2>
+  </div>
+  <p>Hi {{.Name}},</p>
+  <p>A remediation action assigned to you is due on <strong>{{.DueDate}}</strong>.</p>
+  <p><strong>Action:</strong> {{.ActionDescription}}</p>
+  <p><strong>Inspection:</strong> {{.ProjectName}}</p>
+  <p>Please upload your evidence before the deadline.</p>
+  <a href="{{.ActionURL}}" style="display:inline-block;background:#e65100;color:#fff;padding:10px 24px;border-radius:4px;text-decoration:none;margin-top:16px">View Action</a>
+  <p style="margin-top:32px;font-size:12px;color:#999">EcoComply NG · Environmental Compliance Platform</p>
+</body>
+</html>

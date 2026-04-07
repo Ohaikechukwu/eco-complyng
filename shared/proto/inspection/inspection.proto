@@ -1,0 +1,15 @@
+syntax = "proto3";
+package inspection;
+option go_package = "github.com/ecocomply/shared/proto/inspection";
+
+service InspectionService {
+  rpc GetInspection(GetInspectionRequest) returns (GetInspectionResponse);
+}
+
+message GetInspectionRequest { string inspection_id = 1; string org_schema = 2; }
+message GetInspectionResponse {
+  string id = 1;
+  string project_name = 2;
+  string status = 3;
+  string inspector_name = 4;
+}

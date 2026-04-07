@@ -1,0 +1,12 @@
+DROP TRIGGER IF EXISTS set_agreed_actions_updated_at   ON agreed_actions;
+DROP TRIGGER IF EXISTS set_checklist_items_updated_at  ON checklist_items;
+DROP TRIGGER IF EXISTS set_inspections_updated_at      ON inspections;
+DROP FUNCTION IF EXISTS trigger_set_updated_at();
+DROP TABLE IF EXISTS inspection_comments;
+DROP TABLE IF EXISTS agreed_actions;
+DROP TABLE IF EXISTS checklist_items;
+DROP TABLE IF EXISTS inspections;
+DROP TABLE IF EXISTS checklist_template_items;
+DROP TABLE IF EXISTS checklist_templates;
+DROP TYPE  IF EXISTS action_status;
+DROP TYPE  IF EXISTS inspection_status;

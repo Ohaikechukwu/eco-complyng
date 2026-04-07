@@ -1,0 +1,15 @@
+<!DOCTYPE html>
+<html>
+<body style="font-family:Arial,sans-serif;color:#1a1a1a;max-width:600px;margin:0 auto;padding:32px">
+  <div style="border-bottom:3px solid #2e7d32;padding-bottom:16px;margin-bottom:24px">
+    <h2 style="color:#2e7d32;margin:0">EcoComply NG</h2>
+  </div>
+  <h3>You've been invited</h3>
+  <p>Hi {{.Name}},</p>
+  <p>You have been invited to join <strong>{{.OrgName}}</strong> on EcoComply NG as a <strong>{{.Role}}</strong>.</p>
+  <p>Your temporary password is: <code style="background:#f5f5f5;padding:4px 8px;border-radius:4px">{{.TempPassword}}</code></p>
+  <p>Please log in and change your password immediately.</p>
+  <a href="{{.LoginURL}}" style="display:inline-block;background:#2e7d32;color:#fff;padding:10px 24px;border-radius:4px;text-decoration:none;margin-top:16px">Log In</a>
+  <p style="margin-top:32px;font-size:12px;color:#999">EcoComply NG · Environmental Compliance Platform</p>
+</body>
+</html>

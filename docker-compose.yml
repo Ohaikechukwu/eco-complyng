@@ -1,0 +1,121 @@
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: secret
+      POSTGRES_DB: ecocomply
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./infra/docker/postgres/init.sql:/docker-entrypoint-initdb.d/init.sql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    volumes:
+      - ./infra/docker/redis/redis.conf:/usr/local/etc/redis/redis.conf
+    command: redis-server /usr/local/etc/redis/redis.conf
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  api-gateway:
+    build:
+      context: .
+      dockerfile: api-gateway/Dockerfile
+    ports:
+      - "8080:8080"
+    env_file: ./api-gateway/.env
+    depends_on:
+      - postgres
+      - redis
+
+  auth-service:
+    build:
+      context: .
+      dockerfile: services/auth-service/Dockerfile
+    ports:
+      - "8081:8081"
+      - "50051:50051"
+    env_file: ./services/auth-service/.env
+    depends_on:
+      - postgres
+      - redis
+
+  inspection-service:
+    build:
+      context: .
+      dockerfile: services/inspection-service/Dockerfile
+    ports:
+      - "8082:8082"
+      - "50052:50052"
+    env_file: ./services/inspection-service/.env
+    depends_on:
+      - postgres
+      - redis
+
+  media-service:
+    build:
+      context: .
+      dockerfile: services/media-service/Dockerfile
+    ports:
+      - "8083:8083"
+    env_file: ./services/media-service/.env
+    depends_on:
+      - postgres
+
+  report-service:
+    build:
+      context: .
+      dockerfile: services/report-service/Dockerfile
+    ports:
+      - "8084:8084"
+    env_file: ./services/report-service/.env
+    depends_on:
+      - postgres
+
+  collaboration-service:
+    build:
+      context: .
+      dockerfile: services/collaboration-service/Dockerfile
+    ports:
+      - "8085:8085"
+    env_file: ./services/collaboration-service/.env
+    depends_on:
+      - postgres
+      - redis
+
+  notification-service:
+    build:
+      context: .
+      dockerfile: services/notification-service/Dockerfile
+    ports:
+      - "8086:8086"
+    env_file: ./services/notification-service/.env
+    depends_on:
+      - postgres
+      - redis
+
+  export-service:
+    build:
+      context: .
+      dockerfile: services/export-service/Dockerfile
+    ports:
+      - "8087:8087"
+    env_file: ./services/export-service/.env
+    depends_on:
+      - postgres
+
+volumes:
+  postgres_data:

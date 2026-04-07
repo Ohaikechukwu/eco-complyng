@@ -1,0 +1,237 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Inspection Report — {{.ProjectName}}</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: Arial, sans-serif; font-size: 13px; color: #1a1a1a; background: #fff; }
+
+    .cover { padding: 60px 48px; border-bottom: 4px solid #2e7d32; }
+    .cover h1 { font-size: 26px; color: #2e7d32; margin-bottom: 8px; }
+    .cover .subtitle { font-size: 14px; color: #555; margin-bottom: 32px; }
+    .cover table { width: 100%; border-collapse: collapse; }
+    .cover table td { padding: 6px 0; vertical-align: top; }
+    .cover table td:first-child { font-weight: bold; width: 180px; }
+
+    .section { padding: 32px 48px; border-bottom: 1px solid #e0e0e0; }
+    .section h2 { font-size: 15px; font-weight: bold; color: #2e7d32; text-transform: uppercase;
+                  letter-spacing: 0.5px; margin-bottom: 16px; padding-bottom: 6px;
+                  border-bottom: 2px solid #e8f5e9; }
+
+    .checklist-table { width: 100%; border-collapse: collapse; margin-top: 8px; }
+    .checklist-table th { background: #e8f5e9; color: #2e7d32; text-align: left;
+                          padding: 8px 10px; font-size: 12px; }
+    .checklist-table td { padding: 8px 10px; border-bottom: 1px solid #f0f0f0; vertical-align: top; }
+    .checklist-table tr:nth-child(even) td { background: #fafafa; }
+
+    .badge { display: inline-block; padding: 2px 10px; border-radius: 12px;
+             font-size: 11px; font-weight: bold; }
+    .badge-yes  { background: #e8f5e9; color: #2e7d32; }
+    .badge-no   { background: #ffebee; color: #c62828; }
+    .badge-na   { background: #f5f5f5; color: #757575; }
+
+    .actions-table { width: 100%; border-collapse: collapse; margin-top: 8px; }
+    .actions-table th { background: #fff3e0; color: #e65100; text-align: left;
+                        padding: 8px 10px; font-size: 12px; }
+    .actions-table td { padding: 8px 10px; border-bottom: 1px solid #f0f0f0; vertical-align: top; }
+
+    .status-pending   { color: #f57c00; font-weight: bold; }
+    .status-resolved  { color: #2e7d32; font-weight: bold; }
+    .status-overdue   { color: #c62828; font-weight: bold; }
+
+    .media-grid { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 12px; }
+    .media-item { width: 180px; }
+    .media-item img { width: 100%; height: 130px; object-fit: cover;
+                      border: 1px solid #e0e0e0; border-radius: 4px; }
+    .media-item .caption { font-size: 10px; color: #888; margin-top: 4px; }
+
+    .summary-box { display: flex; gap: 24px; margin-top: 8px; }
+    .summary-card { flex: 1; padding: 16px; border-radius: 6px; text-align: center; }
+    .summary-card .count { font-size: 28px; font-weight: bold; }
+    .summary-card .label { font-size: 11px; color: #666; margin-top: 4px; }
+    .card-green { background: #e8f5e9; color: #2e7d32; }
+    .card-red   { background: #ffebee; color: #c62828; }
+    .card-grey  { background: #f5f5f5; color: #555; }
+
+    .footer { padding: 20px 48px; font-size: 11px; color: #999; text-align: center; }
+  </style>
+</head>
+<body>
+
+<!-- COVER -->
+<div class="cover">
+  <h1>Environmental Inspection Report</h1>
+  <p class="subtitle">EcoComply NG — Generated Report</p>
+  <table>
+    <tr><td>Project</td><td>{{.ProjectName}}</td></tr>
+    <tr><td>Location</td><td>{{.Location}}</td></tr>
+    <tr><td>Inspection Date</td><td>{{.Date}}</td></tr>
+    <tr><td>Inspector</td><td>{{.InspectorName}}</td></tr>
+    <tr><td>Role</td><td>{{.InspectorRole}}</td></tr>
+    <tr><td>Status</td><td>{{.Status}}</td></tr>
+    <tr><td>Report Generated</td><td>{{.GeneratedAt}}</td></tr>
+  </table>
+</div>
+
+<!-- SUMMARY -->
+<div class="section">
+  <h2>Compliance Summary</h2>
+  <div class="summary-box">
+    <div class="summary-card card-green">
+      <div class="count">{{.ConformanceCount}}</div>
+      <div class="label">Conformance</div>
+    </div>
+    <div class="summary-card card-red">
+      <div class="count">{{.NonConformanceCount}}</div>
+      <div class="label">Non-Conformance</div>
+    </div>
+    <div class="summary-card card-grey">
+      <div class="count">{{.UnansweredCount}}</div>
+      <div class="label">Unanswered</div>
+    </div>
+  </div>
+</div>
+
+<!-- CHECKLIST -->
+<div class="section">
+  <h2>Checklist Responses</h2>
+  <table class="checklist-table">
+    <thead>
+      <tr>
+        <th>#</th>
+        <th>Item</th>
+        <th>Response</th>
+        <th>Comment</th>
+      </tr>
+    </thead>
+    <tbody>
+      {{range $i, $item := .ChecklistItems}}
+      <tr>
+        <td>{{inc $i}}</td>
+        <td>{{$item.Description}}</td>
+        <td>
+          {{if eq $item.Response "yes"}}
+            <span class="badge badge-yes">YES</span>
+          {{else if eq $item.Response "no"}}
+            <span class="badge badge-no">NO</span>
+          {{else}}
+            <span class="badge badge-na">N/A</span>
+          {{end}}
+        </td>
+        <td>{{$item.Comment}}</td>
+      </tr>
+      {{end}}
+    </tbody>
+  </table>
+</div>
+
+{{if .ConformanceAreas}}
+<div class="section">
+  <h2>Areas of Conformance</h2>
+  <table class="checklist-table">
+    <thead>
+      <tr>
+        <th>#</th>
+        <th>Item</th>
+        <th>Comment</th>
+      </tr>
+    </thead>
+    <tbody>
+      {{range $i, $item := .ConformanceAreas}}
+      <tr>
+        <td>{{inc $i}}</td>
+        <td>{{$item.Description}}</td>
+        <td>{{$item.Comment}}</td>
+      </tr>
+      {{end}}
+    </tbody>
+  </table>
+</div>
+{{end}}
+
+{{if .NonConformanceAreas}}
+<div class="section">
+  <h2>Areas of Non-Conformance</h2>
+  <table class="checklist-table">
+    <thead>
+      <tr>
+        <th>#</th>
+        <th>Item</th>
+        <th>Comment</th>
+      </tr>
+    </thead>
+    <tbody>
+      {{range $i, $item := .NonConformanceAreas}}
+      <tr>
+        <td>{{inc $i}}</td>
+        <td>{{$item.Description}}</td>
+        <td>{{$item.Comment}}</td>
+      </tr>
+      {{end}}
+    </tbody>
+  </table>
+</div>
+{{end}}
+
+<!-- AGREED ACTIONS -->
+{{if .AgreedActions}}
+<div class="section">
+  <h2>Agreed Actions</h2>
+  <table class="actions-table">
+    <thead>
+      <tr>
+        <th>#</th>
+        <th>Description</th>
+        <th>Assignee</th>
+        <th>Due Date</th>
+        <th>Status</th>
+      </tr>
+    </thead>
+    <tbody>
+      {{range $i, $action := .AgreedActions}}
+      <tr>
+        <td>{{inc $i}}</td>
+        <td>{{$action.Description}}</td>
+        <td>{{$action.AssigneeID}}</td>
+        <td>{{$action.DueDate}}</td>
+        <td class="status-{{$action.Status}}">{{upper $action.Status}}</td>
+      </tr>
+      {{end}}
+    </tbody>
+  </table>
+</div>
+{{end}}
+
+<!-- COMMENTS -->
+{{if .ReviewComments}}
+<div class="section">
+  <h2>Review Comments</h2>
+  {{range .ReviewComments}}
+  <p style="margin-bottom:8px"><strong>{{.CreatedAt}}</strong>: {{.Body}}</p>
+  {{end}}
+</div>
+{{end}}
+
+<!-- MEDIA -->
+{{if .MediaItems}}
+<div class="section">
+  <h2>Attached Photos</h2>
+  <div class="media-grid">
+    {{range .MediaItems}}
+    <div class="media-item">
+      <img src="{{.URL}}" alt="Inspection photo" />
+      <div class="caption">{{.CapturedAt}} · {{.CapturedVia}}</div>
+    </div>
+    {{end}}
+  </div>
+</div>
+{{end}}
+
+<div class="footer">
+  EcoComply NG · Report ID: {{.ReportID}} · {{.GeneratedAt}}
+</div>
+
+</body>
+</html>
