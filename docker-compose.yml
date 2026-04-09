@@ -1,4 +1,3 @@
-
 services:
   postgres:
     image: postgres:16-alpine
@@ -38,8 +37,10 @@ services:
       - "8080:8080"
     env_file: ./api-gateway/.env
     depends_on:
-      - postgres
-      - redis
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
 
   auth-service:
     build:
@@ -50,8 +51,10 @@ services:
       - "50051:50051"
     env_file: ./services/auth-service/.env
     depends_on:
-      - postgres
-      - redis
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
 
   inspection-service:
     build:
@@ -62,8 +65,10 @@ services:
       - "50052:50052"
     env_file: ./services/inspection-service/.env
     depends_on:
-      - postgres
-      - redis
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
 
   media-service:
     build:
@@ -73,7 +78,8 @@ services:
       - "8083:8083"
     env_file: ./services/media-service/.env
     depends_on:
-      - postgres
+      postgres:
+        condition: service_healthy
 
   report-service:
     build:
@@ -83,7 +89,8 @@ services:
       - "8084:8084"
     env_file: ./services/report-service/.env
     depends_on:
-      - postgres
+      postgres:
+        condition: service_healthy
 
   collaboration-service:
     build:
@@ -93,8 +100,10 @@ services:
       - "8085:8085"
     env_file: ./services/collaboration-service/.env
     depends_on:
-      - postgres
-      - redis
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
 
   notification-service:
     build:
@@ -104,8 +113,10 @@ services:
       - "8086:8086"
     env_file: ./services/notification-service/.env
     depends_on:
-      - postgres
-      - redis
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
 
   export-service:
     build:
@@ -115,7 +126,8 @@ services:
       - "8087:8087"
     env_file: ./services/export-service/.env
     depends_on:
-      - postgres
+      postgres:
+        condition: service_healthy
 
 volumes:
   postgres_data:
