@@ -199,7 +199,7 @@ func (h *AuthHandler) ListUsers(c *gin.Context) {
 func setAuthCookies(c *gin.Context, accessToken, refreshToken string) {
 	secure := c.Request.TLS != nil
 	c.SetCookie("access_token", accessToken, 3600*24, "/", "", secure, true)
-	c.SetCookie("refresh_token", refreshToken, 3600*24*7, "/api/v1/auth/refresh", "", secure, true)
+	c.SetCookie("refresh_token", refreshToken, 3600*24*7, "/", "", secure, true)
 }
 
 func handleServiceError(c *gin.Context, err error) {
