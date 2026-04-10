@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"regexp"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	gormpostgres "gorm.io/driver/postgres"
@@ -31,9 +32,18 @@ func Connect(cfg Config) (*gorm.DB, error) {
 		"host=%s port=%s user=%s password=%s dbname=%s sslmode=disable TimeZone=UTC",
 		cfg.Host, cfg.Port, cfg.User, cfg.Password, cfg.DBName,
 	)
-	return gorm.Open(gormpostgres.Open(dsn), &gorm.Config{
+	db, err := gorm.Open(gormpostgres.Open(dsn), &gorm.Config{
 		Logger: logger.Default.LogMode(logger.Info),
 	})
+	if err != nil {
+		return nil, err
+	}
+
+	if err := configurePool(db); err != nil {
+		return nil, err
+	}
+
+	return db, nil
 }
 
 // WithSchema opens a new DB connection scoped to the given schema.
@@ -49,9 +59,32 @@ func ConnectWithSchema(cfg Config, schema string) (*gorm.DB, error) {
 		"host=%s port=%s user=%s password=%s dbname=%s sslmode=disable TimeZone=UTC search_path=%s,public",
 		cfg.Host, cfg.Port, cfg.User, cfg.Password, cfg.DBName, schema,
 	)
-	return gorm.Open(gormpostgres.Open(dsn), &gorm.Config{
+	db, err := gorm.Open(gormpostgres.Open(dsn), &gorm.Config{
 		Logger: logger.Default.LogMode(logger.Info),
 	})
+	if err != nil {
+		return nil, err
+	}
+
+	if err := configurePool(db); err != nil {
+		return nil, err
+	}
+
+	return db, nil
+}
+
+func configurePool(db *gorm.DB) error {
+	sqlDB, err := db.DB()
+	if err != nil {
+		return err
+	}
+
+	sqlDB.SetMaxOpenConns(25)
+	sqlDB.SetMaxIdleConns(10)
+	sqlDB.SetConnMaxLifetime(30 * time.Minute)
+	sqlDB.SetConnMaxIdleTime(5 * time.Minute)
+
+	return nil
 }
 
 func ContextWithDB(ctx context.Context, db *gorm.DB) context.Context {

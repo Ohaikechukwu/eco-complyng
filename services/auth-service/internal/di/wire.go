@@ -52,16 +52,16 @@ func NewContainer(cfg *config.Config) (*Container, error) {
 		return nil, fmt.Errorf("redis: %w", err)
 	}
 
-	jwtManager        := sharedjwt.NewManager(cfg.JWTSecret, cfg.JWTExpiryHrs)
-	tokenCache        := cache.NewTokenCache(rdb)
+	jwtManager := sharedjwt.NewManager(cfg.JWTSecret, cfg.JWTExpiryHrs)
+	tokenCache := cache.NewTokenCache(rdb)
 	notificationClient := service.NewNotificationClient(cfg.NotificationServiceURL)
 
-	orgRepo   := postgres.NewOrgRepository(db)
-	userRepo  := postgres.NewUserRepository(db)
+	orgRepo := postgres.NewOrgRepository(db)
+	userRepo := postgres.NewUserRepository(db)
 	tokenRepo := postgres.NewTokenRepository(db)
 
 	authSvc := service.NewAuthService(
-		dbCfg, db,
+		db,
 		userRepo, orgRepo, tokenRepo,
 		tokenCache, jwtManager,
 		notificationClient,

@@ -24,19 +24,17 @@ import (
 )
 
 type AuthService struct {
-	dbCfg                  sharedpostgres.Config
-	db                     *gorm.DB
-	userRepo               irepository.UserRepository
-	orgRepo                irepository.OrgRepository
-	tokenRepo              irepository.TokenRepository
-	tokenCache             *cache.TokenCache
-	jwt                    *sharedjwt.Manager
-	notificationClient     *NotificationClient
-	appBaseURL             string
+	db                 *gorm.DB
+	userRepo           irepository.UserRepository
+	orgRepo            irepository.OrgRepository
+	tokenRepo          irepository.TokenRepository
+	tokenCache         *cache.TokenCache
+	jwt                *sharedjwt.Manager
+	notificationClient *NotificationClient
+	appBaseURL         string
 }
 
 func NewAuthService(
-	dbCfg sharedpostgres.Config,
 	db *gorm.DB,
 	userRepo irepository.UserRepository,
 	orgRepo irepository.OrgRepository,
@@ -47,7 +45,6 @@ func NewAuthService(
 	appBaseURL string,
 ) *AuthService {
 	return &AuthService{
-		dbCfg:              dbCfg,
 		db:                 db,
 		userRepo:           userRepo,
 		orgRepo:            orgRepo,
@@ -57,10 +54,6 @@ func NewAuthService(
 		notificationClient: notificationClient,
 		appBaseURL:         appBaseURL,
 	}
-}
-
-func (s *AuthService) tenantDB(schema string) (*gorm.DB, error) {
-	return sharedpostgres.ConnectWithSchema(s.dbCfg, schema)
 }
 
 func (s *AuthService) RegisterOrg(ctx context.Context, req request.RegisterOrgRequest) (*response.RegisterOrgResponse, error) {
@@ -102,13 +95,11 @@ func (s *AuthService) RegisterOrg(ctx context.Context, req request.RegisterOrgRe
 		MustChangePassword: false,
 	}
 
-	tdb, err := s.tenantDB(schemaName)
-	if err != nil {
-		return nil, fmt.Errorf("tenant db connection failed: %w", err)
-	}
-	tenantUserRepo := postgres.NewUserRepository(tdb)
-	if err := tenantUserRepo.Create(ctx, admin); err != nil {
-		return nil, err
+	if err := withTenantTx(ctx, s.db, schemaName, func(tenantCtx context.Context, tdb *gorm.DB) error {
+		tenantUserRepo := postgres.NewUserRepository(tdb)
+		return tenantUserRepo.Create(tenantCtx, admin)
+	}); err != nil {
+		return nil, fmt.Errorf("tenant db transaction failed: %w", err)
 	}
 
 	_ = s.tokenCache.CacheOrgSchema(ctx, org.ID.String(), schemaName)
@@ -125,42 +116,48 @@ func (s *AuthService) Login(ctx context.Context, orgID uuid.UUID, req request.Lo
 		return nil, err
 	}
 
-	tdb, err := s.tenantDB(org.SchemaName)
-	if err != nil {
-		return nil, err
-	}
-	tenantUserRepo := postgres.NewUserRepository(tdb)
+	var result *response.LoginResponse
+	err = withTenantTx(ctx, s.db, org.SchemaName, func(tenantCtx context.Context, tdb *gorm.DB) error {
+		tenantUserRepo := postgres.NewUserRepository(tdb)
 
-	user, err := tenantUserRepo.FindByEmail(ctx, req.Email)
-	if err != nil {
-		if errors.Is(err, domain.ErrNotFound) {
-			return nil, domain.ErrInvalidCredentials
+		user, err := tenantUserRepo.FindByEmail(tenantCtx, req.Email)
+		if err != nil {
+			if errors.Is(err, domain.ErrNotFound) {
+				return domain.ErrInvalidCredentials
+			}
+			return err
 		}
-		return nil, err
-	}
 
-	if !user.IsActive {
-		return nil, domain.ErrAccountInactive
-	}
+		if !user.IsActive {
+			return domain.ErrAccountInactive
+		}
 
-	if err := bcrypt.CompareHashAndPassword([]byte(user.PasswordHash), []byte(req.Password)); err != nil {
-		return nil, domain.ErrInvalidCredentials
-	}
+		if err := bcrypt.CompareHashAndPassword([]byte(user.PasswordHash), []byte(req.Password)); err != nil {
+			return domain.ErrInvalidCredentials
+		}
 
-	tokens, err := s.issueTokenPair(ctx, user, org, tdb)
+		tokens, err := s.issueTokenPair(tenantCtx, user, org, tdb)
+		if err != nil {
+			return err
+		}
+
+		now := time.Now()
+		user.LastLoginAt = &now
+		_ = tenantUserRepo.Update(tenantCtx, user)
+
+		result = &response.LoginResponse{
+			Tokens: *tokens,
+			User:   toUserResponse(user),
+			Org:    toOrgResponse(org),
+		}
+
+		return nil
+	})
 	if err != nil {
 		return nil, err
 	}
 
-	now := time.Now()
-	user.LastLoginAt = &now
-	_ = tenantUserRepo.Update(ctx, user)
-
-	return &response.LoginResponse{
-		Tokens: *tokens,
-		User:   toUserResponse(user),
-		Org:    toOrgResponse(org),
-	}, nil
+	return result, nil
 }
 
 func (s *AuthService) RefreshToken(ctx context.Context, rawToken string) (*response.TokenPair, error) {
@@ -180,26 +177,30 @@ func (s *AuthService) RefreshToken(ctx context.Context, rawToken string) (*respo
 		return nil, err
 	}
 
-	tdb, err := s.tenantDB(schema)
+	var tokens *response.TokenPair
+	err = withTenantTx(ctx, s.db, schema, func(tenantCtx context.Context, tdb *gorm.DB) error {
+		tenantTokenRepo := postgres.NewTokenRepository(tdb)
+		userID, _, err := tenantTokenRepo.FindRefreshToken(tenantCtx, tokenHash)
+		if err != nil {
+			return domain.ErrTokenInvalid
+		}
+		_ = tenantTokenRepo.RevokeRefreshToken(tenantCtx, tokenHash)
+		_ = s.tokenCache.DeleteRefreshTokenContext(tenantCtx, tokenHash)
+
+		tenantUserRepo := postgres.NewUserRepository(tdb)
+		user, err := tenantUserRepo.FindByID(tenantCtx, userID)
+		if err != nil {
+			return err
+		}
+
+		tokens, err = s.issueTokenPair(tenantCtx, user, org, tdb)
+		return err
+	})
 	if err != nil {
 		return nil, err
 	}
 
-	tenantTokenRepo := postgres.NewTokenRepository(tdb)
-	userID, _, err := tenantTokenRepo.FindRefreshToken(ctx, tokenHash)
-	if err != nil {
-		return nil, domain.ErrTokenInvalid
-	}
-	_ = tenantTokenRepo.RevokeRefreshToken(ctx, tokenHash)
-	_ = s.tokenCache.DeleteRefreshTokenContext(ctx, tokenHash)
-
-	tenantUserRepo := postgres.NewUserRepository(tdb)
-	user, err := tenantUserRepo.FindByID(ctx, userID)
-	if err != nil {
-		return nil, err
-	}
-
-	return s.issueTokenPair(ctx, user, org, tdb)
+	return tokens, nil
 }
 
 func (s *AuthService) Logout(ctx context.Context, tokenID string, rawRefreshToken string, ttl time.Duration) error {
@@ -211,17 +212,6 @@ func (s *AuthService) Logout(ctx context.Context, tokenID string, rawRefreshToke
 }
 
 func (s *AuthService) InviteUser(ctx context.Context, inviterID uuid.UUID, orgSchema string, orgName string, req request.InviteUserRequest) (*response.UserResponse, error) {
-	tdb, err := s.tenantDB(orgSchema)
-	if err != nil {
-		return nil, err
-	}
-	tenantUserRepo := postgres.NewUserRepository(tdb)
-
-	_, err = tenantUserRepo.FindByEmail(ctx, req.Email)
-	if err == nil {
-		return nil, domain.ErrAlreadyExists
-	}
-
 	// Generate readable temp password: 12 chars
 	rawTemp := generateReadablePassword()
 	hash, err := bcrypt.GenerateFromPassword([]byte(rawTemp), bcrypt.DefaultCost)
@@ -239,7 +229,19 @@ func (s *AuthService) InviteUser(ctx context.Context, inviterID uuid.UUID, orgSc
 		InvitedBy:          &inviterID,
 	}
 
-	if err := tenantUserRepo.Create(ctx, user); err != nil {
+	if err := withTenantTx(ctx, s.db, orgSchema, func(tenantCtx context.Context, tdb *gorm.DB) error {
+		tenantUserRepo := postgres.NewUserRepository(tdb)
+
+		_, err := tenantUserRepo.FindByEmail(tenantCtx, req.Email)
+		if err == nil {
+			return domain.ErrAlreadyExists
+		}
+		if err != nil && !errors.Is(err, domain.ErrNotFound) {
+			return err
+		}
+
+		return tenantUserRepo.Create(tenantCtx, user)
+	}); err != nil {
 		return nil, err
 	}
 
@@ -269,87 +271,98 @@ func (s *AuthService) InviteUser(ctx context.Context, inviterID uuid.UUID, orgSc
 }
 
 func (s *AuthService) UpdateRole(ctx context.Context, userID uuid.UUID, orgSchema string, req request.UpdateRoleRequest) (*response.UserResponse, error) {
-	tdb, err := s.tenantDB(orgSchema)
-	if err != nil {
-		return nil, err
-	}
-	tenantUserRepo := postgres.NewUserRepository(tdb)
+	var res response.UserResponse
+	err := withTenantTx(ctx, s.db, orgSchema, func(tenantCtx context.Context, tdb *gorm.DB) error {
+		tenantUserRepo := postgres.NewUserRepository(tdb)
 
-	user, err := tenantUserRepo.FindByID(ctx, userID)
+		user, err := tenantUserRepo.FindByID(tenantCtx, userID)
+		if err != nil {
+			return err
+		}
+		user.Role = domain.Role(req.Role)
+		if err := tenantUserRepo.Update(tenantCtx, user); err != nil {
+			return err
+		}
+		res = toUserResponse(user)
+		return nil
+	})
 	if err != nil {
 		return nil, err
 	}
-	user.Role = domain.Role(req.Role)
-	if err := tenantUserRepo.Update(ctx, user); err != nil {
-		return nil, err
-	}
-	res := toUserResponse(user)
 	return &res, nil
 }
 
 func (s *AuthService) GetProfile(ctx context.Context, userID uuid.UUID, orgSchema string) (*response.UserResponse, error) {
-	tdb, err := s.tenantDB(orgSchema)
+	var res response.UserResponse
+	err := withTenantTx(ctx, s.db, orgSchema, func(tenantCtx context.Context, tdb *gorm.DB) error {
+		tenantUserRepo := postgres.NewUserRepository(tdb)
+		user, err := tenantUserRepo.FindByID(tenantCtx, userID)
+		if err != nil {
+			return err
+		}
+		res = toUserResponse(user)
+		return nil
+	})
 	if err != nil {
 		return nil, err
 	}
-	tenantUserRepo := postgres.NewUserRepository(tdb)
-	user, err := tenantUserRepo.FindByID(ctx, userID)
-	if err != nil {
-		return nil, err
-	}
-	res := toUserResponse(user)
 	return &res, nil
 }
 
 func (s *AuthService) UpdateProfile(ctx context.Context, userID uuid.UUID, orgSchema string, req request.UpdateProfileRequest) (*response.UserResponse, error) {
-	tdb, err := s.tenantDB(orgSchema)
+	var res response.UserResponse
+	err := withTenantTx(ctx, s.db, orgSchema, func(tenantCtx context.Context, tdb *gorm.DB) error {
+		tenantUserRepo := postgres.NewUserRepository(tdb)
+		user, err := tenantUserRepo.FindByID(tenantCtx, userID)
+		if err != nil {
+			return err
+		}
+		if req.Name != "" {
+			user.Name = req.Name
+		}
+		if err := tenantUserRepo.Update(tenantCtx, user); err != nil {
+			return err
+		}
+		res = toUserResponse(user)
+		return nil
+	})
 	if err != nil {
 		return nil, err
 	}
-	tenantUserRepo := postgres.NewUserRepository(tdb)
-	user, err := tenantUserRepo.FindByID(ctx, userID)
-	if err != nil {
-		return nil, err
-	}
-	if req.Name != "" {
-		user.Name = req.Name
-	}
-	if err := tenantUserRepo.Update(ctx, user); err != nil {
-		return nil, err
-	}
-	res := toUserResponse(user)
 	return &res, nil
 }
 
 func (s *AuthService) ChangePassword(ctx context.Context, userID uuid.UUID, orgSchema string, req request.ChangePasswordRequest) error {
-	tdb, err := s.tenantDB(orgSchema)
-	if err != nil {
-		return err
-	}
-	tenantUserRepo := postgres.NewUserRepository(tdb)
-	user, err := tenantUserRepo.FindByID(ctx, userID)
-	if err != nil {
-		return err
-	}
-	if err := bcrypt.CompareHashAndPassword([]byte(user.PasswordHash), []byte(req.CurrentPassword)); err != nil {
-		return domain.ErrInvalidCredentials
-	}
-	hash, err := bcrypt.GenerateFromPassword([]byte(req.NewPassword), bcrypt.DefaultCost)
-	if err != nil {
-		return err
-	}
-	user.PasswordHash = string(hash)
-	user.MustChangePassword = false // clear the flag after password change
-	return tenantUserRepo.Update(ctx, user)
+	return withTenantTx(ctx, s.db, orgSchema, func(tenantCtx context.Context, tdb *gorm.DB) error {
+		tenantUserRepo := postgres.NewUserRepository(tdb)
+		user, err := tenantUserRepo.FindByID(tenantCtx, userID)
+		if err != nil {
+			return err
+		}
+		if err := bcrypt.CompareHashAndPassword([]byte(user.PasswordHash), []byte(req.CurrentPassword)); err != nil {
+			return domain.ErrInvalidCredentials
+		}
+		hash, err := bcrypt.GenerateFromPassword([]byte(req.NewPassword), bcrypt.DefaultCost)
+		if err != nil {
+			return err
+		}
+		user.PasswordHash = string(hash)
+		user.MustChangePassword = false // clear the flag after password change
+		return tenantUserRepo.Update(tenantCtx, user)
+	})
 }
 
 func (s *AuthService) ListUsers(ctx context.Context, orgSchema string, limit, offset int) ([]response.UserResponse, int64, error) {
-	tdb, err := s.tenantDB(orgSchema)
-	if err != nil {
-		return nil, 0, err
-	}
-	tenantUserRepo := postgres.NewUserRepository(tdb)
-	users, total, err := tenantUserRepo.List(ctx, limit, offset)
+	var (
+		users []domain.User
+		total int64
+	)
+	err := withTenantTx(ctx, s.db, orgSchema, func(tenantCtx context.Context, tdb *gorm.DB) error {
+		tenantUserRepo := postgres.NewUserRepository(tdb)
+		var err error
+		users, total, err = tenantUserRepo.List(tenantCtx, limit, offset)
+		return err
+	})
 	if err != nil {
 		return nil, 0, err
 	}
@@ -365,26 +378,33 @@ func (s *AuthService) ForgotPassword(ctx context.Context, orgSchema string, req 
 		return domain.ErrInvalidInput
 	}
 
-	tdb, err := s.tenantDB(orgSchema)
-	if err != nil {
-		return err
-	}
-	tenantUserRepo := postgres.NewUserRepository(tdb)
-	tenantTokenRepo := postgres.NewTokenRepository(tdb)
+	var (
+		user     *domain.User
+		rawReset string
+	)
+	err := withTenantTx(ctx, s.db, orgSchema, func(tenantCtx context.Context, tdb *gorm.DB) error {
+		tenantUserRepo := postgres.NewUserRepository(tdb)
+		tenantTokenRepo := postgres.NewTokenRepository(tdb)
 
-	user, err := tenantUserRepo.FindByEmail(ctx, req.Email)
-	if err != nil {
-		if errors.Is(err, domain.ErrNotFound) {
-			return nil
+		var err error
+		user, err = tenantUserRepo.FindByEmail(tenantCtx, req.Email)
+		if err != nil {
+			if errors.Is(err, domain.ErrNotFound) {
+				return nil
+			}
+			return err
 		}
+
+		rawReset = generateToken(24)
+		resetHash := hashToken(rawReset)
+		expiresAt := time.Now().Add(1 * time.Hour)
+		return tenantTokenRepo.SaveResetToken(tenantCtx, user.ID, resetHash, expiresAt)
+	})
+	if err != nil {
 		return err
 	}
-
-	rawReset := generateToken(24)
-	resetHash := hashToken(rawReset)
-	expiresAt := time.Now().Add(1 * time.Hour)
-	if err := tenantTokenRepo.SaveResetToken(ctx, user.ID, resetHash, expiresAt); err != nil {
-		return err
+	if user == nil {
+		return nil
 	}
 
 	resetURL := fmt.Sprintf("%s/reset-password?token=%s.%s", s.appBaseURL, orgSchema, rawReset)
@@ -405,39 +425,37 @@ func (s *AuthService) ResetPassword(ctx context.Context, req request.ResetPasswo
 	orgSchema := parts[0]
 	rawToken := parts[1]
 
-	tdb, err := s.tenantDB(orgSchema)
-	if err != nil {
-		return err
-	}
-	tenantUserRepo := postgres.NewUserRepository(tdb)
-	tenantTokenRepo := postgres.NewTokenRepository(tdb)
+	return withTenantTx(ctx, s.db, orgSchema, func(tenantCtx context.Context, tdb *gorm.DB) error {
+		tenantUserRepo := postgres.NewUserRepository(tdb)
+		tenantTokenRepo := postgres.NewTokenRepository(tdb)
 
-	userID, expiresAt, used, err := tenantTokenRepo.FindResetToken(ctx, hashToken(rawToken))
-	if err != nil {
-		return domain.ErrTokenInvalid
-	}
-	if used || time.Now().After(expiresAt) {
-		return domain.ErrTokenExpired
-	}
+		userID, expiresAt, used, err := tenantTokenRepo.FindResetToken(tenantCtx, hashToken(rawToken))
+		if err != nil {
+			return domain.ErrTokenInvalid
+		}
+		if used || time.Now().After(expiresAt) {
+			return domain.ErrTokenExpired
+		}
 
-	user, err := tenantUserRepo.FindByID(ctx, userID)
-	if err != nil {
-		return err
-	}
+		user, err := tenantUserRepo.FindByID(tenantCtx, userID)
+		if err != nil {
+			return err
+		}
 
-	hash, err := bcrypt.GenerateFromPassword([]byte(req.NewPassword), bcrypt.DefaultCost)
-	if err != nil {
-		return err
-	}
-	user.PasswordHash = string(hash)
-	user.MustChangePassword = false
-	if err := tenantUserRepo.Update(ctx, user); err != nil {
-		return err
-	}
-	if err := tenantTokenRepo.MarkResetTokenUsed(ctx, hashToken(rawToken)); err != nil {
-		return err
-	}
-	return tenantTokenRepo.RevokeAllUserTokens(ctx, userID)
+		hash, err := bcrypt.GenerateFromPassword([]byte(req.NewPassword), bcrypt.DefaultCost)
+		if err != nil {
+			return err
+		}
+		user.PasswordHash = string(hash)
+		user.MustChangePassword = false
+		if err := tenantUserRepo.Update(tenantCtx, user); err != nil {
+			return err
+		}
+		if err := tenantTokenRepo.MarkResetTokenUsed(tenantCtx, hashToken(rawToken)); err != nil {
+			return err
+		}
+		return tenantTokenRepo.RevokeAllUserTokens(tenantCtx, userID)
+	})
 }
 
 func (s *AuthService) issueTokenPair(ctx context.Context, user *domain.User, org *domain.Org, tdb *gorm.DB) (*response.TokenPair, error) {
@@ -483,6 +501,26 @@ func generateReadablePassword() string {
 		b[i] = chars[int(b[i])%len(chars)]
 	}
 	return string(b)
+}
+
+func withTenantTx(ctx context.Context, db *gorm.DB, schema string, fn func(context.Context, *gorm.DB) error) error {
+	tx, err := sharedpostgres.BeginTenantTx(ctx, db, schema)
+	if err != nil {
+		return err
+	}
+
+	tenantCtx := sharedpostgres.ContextWithDB(ctx, tx)
+	if err := fn(tenantCtx, tx); err != nil {
+		_ = tx.Rollback().Error
+		return err
+	}
+
+	if err := tx.Commit().Error; err != nil {
+		_ = tx.Rollback().Error
+		return err
+	}
+
+	return nil
 }
 
 func toUserResponse(u *domain.User) response.UserResponse {
