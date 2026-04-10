@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"fmt"
 	"net/http"
 	"time"
 
@@ -197,9 +198,14 @@ func (h *AuthHandler) ListUsers(c *gin.Context) {
 }
 
 func setAuthCookies(c *gin.Context, accessToken, refreshToken string) {
-	secure := c.Request.TLS != nil
-	c.SetCookie("access_token", accessToken, 3600*24, "/", "", secure, true)
-	c.SetCookie("refresh_token", refreshToken, 3600*24*7, "/", "", secure, true)
+	c.Writer.Header().Add("Set-Cookie", fmt.Sprintf(
+		"access_token=%s; Max-Age=%d; Path=/; HttpOnly; Secure; SameSite=None",
+		accessToken, 3600*24,
+	))
+	c.Writer.Header().Add("Set-Cookie", fmt.Sprintf(
+		"refresh_token=%s; Max-Age=%d; Path=/; HttpOnly; Secure; SameSite=None",
+		refreshToken, 3600*24*7,
+	))
 }
 
 func handleServiceError(c *gin.Context, err error) {
