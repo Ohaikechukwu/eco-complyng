@@ -1,7 +1,8 @@
 package handler
 
 import (
-	"fmt"
+	"crypto/rand"
+	"encoding/hex"
 	"net/http"
 	"time"
 
@@ -16,11 +17,37 @@ import (
 )
 
 type AuthHandler struct {
-	svc *service.AuthService
+	svc          *service.AuthService
+	cookieConfig CookieConfig
 }
 
-func NewAuthHandler(svc *service.AuthService) *AuthHandler {
-	return &AuthHandler{svc: svc}
+type CookieConfig struct {
+	Domain            string
+	Secure            bool
+	SameSite          http.SameSite
+	AccessCookieName  string
+	RefreshCookieName string
+	CSRFCookieName    string
+	AccessCookiePath  string
+	RefreshCookiePath string
+	CSRFCookiePath    string
+	AccessMaxAge      time.Duration
+	RefreshMaxAge     time.Duration
+}
+
+func ParseSameSite(value string) http.SameSite {
+	switch value {
+	case "Strict", "strict":
+		return http.SameSiteStrictMode
+	case "None", "none":
+		return http.SameSiteNoneMode
+	default:
+		return http.SameSiteLaxMode
+	}
+}
+
+func NewAuthHandler(svc *service.AuthService, cookieConfig CookieConfig) *AuthHandler {
+	return &AuthHandler{svc: svc, cookieConfig: cookieConfig}
 }
 
 func isMobile(c *gin.Context) bool {
@@ -57,7 +84,7 @@ func (h *AuthHandler) Login(c *gin.Context) {
 	if isMobile(c) {
 		response.OK(c, "login successful", res)
 	} else {
-		setAuthCookies(c, res.Tokens.AccessToken, res.Tokens.RefreshToken)
+		h.setAuthCookies(c, res.Tokens.AccessToken, res.Tokens.RefreshToken)
 		response.OK(c, "login successful", gin.H{
 			"user": res.User,
 			"org":  res.Org,
@@ -93,17 +120,28 @@ func (h *AuthHandler) RefreshToken(c *gin.Context) {
 	if isMobile(c) {
 		response.OK(c, "token refreshed", tokens)
 	} else {
-		setAuthCookies(c, tokens.AccessToken, tokens.RefreshToken)
+		h.setAuthCookies(c, tokens.AccessToken, tokens.RefreshToken)
 		response.OK(c, "token refreshed", nil)
 	}
 }
 
 func (h *AuthHandler) Logout(c *gin.Context) {
-	tokenID, _ := c.Get("token_id")
-	refreshToken, _ := c.Cookie("refresh_token")
-	_ = h.svc.Logout(c.Request.Context(), tokenID.(string), refreshToken, 24*time.Hour)
-	c.SetCookie("access_token", "", -1, "/", "", true, true)
-	c.SetCookie("refresh_token", "", -1, "/", "", true, true)
+	var tokenID string
+	if value, ok := c.Get(middleware.ContextTokenID); ok {
+		tokenID, _ = value.(string)
+	}
+
+	var accessExpiresAt time.Time
+	if value, ok := c.Get(middleware.ContextTokenExpiry); ok {
+		if expiry, ok := value.(time.Time); ok {
+			accessExpiresAt = expiry
+		}
+	}
+
+	refreshToken, _ := c.Cookie(h.cookieConfig.RefreshCookieName)
+	orgSchema := c.GetString(middleware.ContextOrgSchema)
+	_ = h.svc.Logout(c.Request.Context(), tokenID, accessExpiresAt, refreshToken, orgSchema)
+	h.clearAuthCookies(c)
 	response.OK(c, "logged out successfully", nil)
 }
 
@@ -115,7 +153,7 @@ func (h *AuthHandler) InviteUser(c *gin.Context) {
 	}
 	inviterID, _ := uuid.Parse(c.GetString(middleware.ContextUserID))
 	orgSchema := c.GetString(middleware.ContextOrgSchema)
-	orgName   := c.GetString(middleware.ContextOrgName)
+	orgName := c.GetString(middleware.ContextOrgName)
 
 	res, err := h.svc.InviteUser(c.Request.Context(), inviterID, orgSchema, orgName, req)
 	if err != nil {
@@ -197,15 +235,78 @@ func (h *AuthHandler) ListUsers(c *gin.Context) {
 	response.OK(c, "users retrieved", gin.H{"users": users, "total": total})
 }
 
-func setAuthCookies(c *gin.Context, accessToken, refreshToken string) {
-	c.Writer.Header().Add("Set-Cookie", fmt.Sprintf(
-		"access_token=%s; Max-Age=%d; Path=/; HttpOnly; Secure; SameSite=None",
-		accessToken, 3600*24,
-	))
-	c.Writer.Header().Add("Set-Cookie", fmt.Sprintf(
-		"refresh_token=%s; Max-Age=%d; Path=/; HttpOnly; Secure; SameSite=None",
-		refreshToken, 3600*24*7,
-	))
+func (h *AuthHandler) setAuthCookies(c *gin.Context, accessToken, refreshToken string) {
+	http.SetCookie(c.Writer, &http.Cookie{
+		Name:     h.cookieConfig.AccessCookieName,
+		Value:    accessToken,
+		Path:     h.cookieConfig.AccessCookiePath,
+		Domain:   h.cookieConfig.Domain,
+		MaxAge:   int(h.cookieConfig.AccessMaxAge.Seconds()),
+		HttpOnly: true,
+		Secure:   h.cookieConfig.Secure,
+		SameSite: h.cookieConfig.SameSite,
+	})
+	http.SetCookie(c.Writer, &http.Cookie{
+		Name:     h.cookieConfig.RefreshCookieName,
+		Value:    refreshToken,
+		Path:     h.cookieConfig.RefreshCookiePath,
+		Domain:   h.cookieConfig.Domain,
+		MaxAge:   int(h.cookieConfig.RefreshMaxAge.Seconds()),
+		HttpOnly: true,
+		Secure:   h.cookieConfig.Secure,
+		SameSite: h.cookieConfig.SameSite,
+	})
+	http.SetCookie(c.Writer, &http.Cookie{
+		Name:     h.cookieConfig.CSRFCookieName,
+		Value:    generateCSRFToken(),
+		Path:     h.cookieConfig.CSRFCookiePath,
+		Domain:   h.cookieConfig.Domain,
+		MaxAge:   int(h.cookieConfig.RefreshMaxAge.Seconds()),
+		HttpOnly: false,
+		Secure:   h.cookieConfig.Secure,
+		SameSite: h.cookieConfig.SameSite,
+	})
+}
+
+func generateCSRFToken() string {
+	buf := make([]byte, 32)
+	if _, err := rand.Read(buf); err != nil {
+		return ""
+	}
+	return hex.EncodeToString(buf)
+}
+
+func (h *AuthHandler) clearAuthCookies(c *gin.Context) {
+	http.SetCookie(c.Writer, &http.Cookie{
+		Name:     h.cookieConfig.AccessCookieName,
+		Value:    "",
+		Path:     h.cookieConfig.AccessCookiePath,
+		Domain:   h.cookieConfig.Domain,
+		MaxAge:   -1,
+		HttpOnly: true,
+		Secure:   h.cookieConfig.Secure,
+		SameSite: h.cookieConfig.SameSite,
+	})
+	http.SetCookie(c.Writer, &http.Cookie{
+		Name:     h.cookieConfig.RefreshCookieName,
+		Value:    "",
+		Path:     h.cookieConfig.RefreshCookiePath,
+		Domain:   h.cookieConfig.Domain,
+		MaxAge:   -1,
+		HttpOnly: true,
+		Secure:   h.cookieConfig.Secure,
+		SameSite: h.cookieConfig.SameSite,
+	})
+	http.SetCookie(c.Writer, &http.Cookie{
+		Name:     h.cookieConfig.CSRFCookieName,
+		Value:    "",
+		Path:     h.cookieConfig.CSRFCookiePath,
+		Domain:   h.cookieConfig.Domain,
+		MaxAge:   -1,
+		HttpOnly: false,
+		Secure:   h.cookieConfig.Secure,
+		SameSite: h.cookieConfig.SameSite,
+	})
 }
 
 func handleServiceError(c *gin.Context, err error) {

@@ -1,28 +1,18 @@
 package middleware
 
 import (
-	"context"
 	"fmt"
 	"net/http"
 	"strings"
-	"time"
 
+	sharedjwt "github.com/ecocomply/shared/pkg/jwt"
 	"github.com/gin-gonic/gin"
-	"github.com/golang-jwt/jwt/v5"
 	"github.com/redis/go-redis/v9"
 )
 
-type GatewayClaims struct {
-	UserID    string `json:"user_id"`
-	OrgID     string `json:"org_id"`
-	OrgSchema string `json:"org_schema"`
-	Role      string `json:"role"`
-	jwt.RegisteredClaims
-}
-
 // ValidateJWT validates the JWT and injects user context headers for downstream services.
 // Downstream services trust these headers since they come from the gateway.
-func ValidateJWT(secret string, rdb *redis.Client) gin.HandlerFunc {
+func ValidateJWT(jwtManager *sharedjwt.Manager, rdb *redis.Client) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		token := extractToken(c)
 		if token == "" {
@@ -31,7 +21,7 @@ func ValidateJWT(secret string, rdb *redis.Client) gin.HandlerFunc {
 			return
 		}
 
-		claims, err := parseToken(token, secret)
+		claims, err := jwtManager.Verify(token)
 		if err != nil {
 			c.JSON(http.StatusUnauthorized, gin.H{"success": false, "error": "invalid or expired token"})
 			c.Abort()
@@ -40,7 +30,7 @@ func ValidateJWT(secret string, rdb *redis.Client) gin.HandlerFunc {
 
 		// Check token blacklist in Redis
 		blacklistKey := fmt.Sprintf("blacklist:%s", claims.ID)
-		exists, _ := rdb.Exists(context.Background(), blacklistKey).Result()
+		exists, _ := rdb.Exists(c.Request.Context(), blacklistKey).Result()
 		if exists > 0 {
 			c.JSON(http.StatusUnauthorized, gin.H{"success": false, "error": "token has been revoked"})
 			c.Abort()
@@ -58,11 +48,11 @@ func ValidateJWT(secret string, rdb *redis.Client) gin.HandlerFunc {
 }
 
 // OptionalJWT validates the JWT only if present — used for public routes like share links.
-func OptionalJWT(secret string) gin.HandlerFunc {
+func OptionalJWT(jwtManager *sharedjwt.Manager) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		token := extractToken(c)
 		if token != "" {
-			if claims, err := parseToken(token, secret); err == nil {
+			if claims, err := jwtManager.Verify(token); err == nil {
 				c.Request.Header.Set("X-User-ID", claims.UserID)
 				c.Request.Header.Set("X-Org-ID", claims.OrgID)
 				c.Request.Header.Set("X-Org-Schema", claims.OrgSchema)
@@ -71,26 +61,6 @@ func OptionalJWT(secret string) gin.HandlerFunc {
 		}
 		c.Next()
 	}
-}
-
-func parseToken(tokenStr, secret string) (*GatewayClaims, error) {
-	token, err := jwt.ParseWithClaims(tokenStr, &GatewayClaims{}, func(t *jwt.Token) (interface{}, error) {
-		if _, ok := t.Method.(*jwt.SigningMethodHMAC); !ok {
-			return nil, fmt.Errorf("unexpected signing method")
-		}
-		return []byte(secret), nil
-	})
-	if err != nil || !token.Valid {
-		return nil, fmt.Errorf("invalid token")
-	}
-	claims, ok := token.Claims.(*GatewayClaims)
-	if !ok {
-		return nil, fmt.Errorf("invalid claims")
-	}
-	if claims.ExpiresAt != nil && claims.ExpiresAt.Before(time.Now()) {
-		return nil, fmt.Errorf("token expired")
-	}
-	return claims, nil
 }
 
 func extractToken(c *gin.Context) string {

@@ -39,8 +39,8 @@ type PermissionLevel string
 type AccessStatus string
 
 const (
-	PermissionViewer  PermissionLevel = "viewer"
-	PermissionEditor  PermissionLevel = "editor"
+	PermissionViewer   PermissionLevel = "viewer"
+	PermissionEditor   PermissionLevel = "editor"
 	PermissionReviewer PermissionLevel = "reviewer"
 
 	AccessPending AccessStatus = "pending"

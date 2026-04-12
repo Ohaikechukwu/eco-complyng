@@ -1,11 +1,18 @@
 package config
 
-import "os"
+import (
+	"os"
+	"strings"
+)
 
 type Config struct {
 	Env                     string
 	Port                    string
 	JWTSecret               string
+	JWTIssuer               string
+	JWTAudiences            []string
+	CSRFCookieName          string
+	CSRFHeaderName          string
 	AllowedOrigins          string
 	RedisHost               string
 	RedisPort               string
@@ -24,6 +31,10 @@ func Load() *Config {
 		Env:                     getEnv("ENV", "development"),
 		Port:                    getEnv("PORT", "8080"),
 		JWTSecret:               getEnv("JWT_SECRET", "change-me"),
+		JWTIssuer:               getEnv("JWT_ISSUER", "auth.ecocomply.ng"),
+		JWTAudiences:            getCSVEnv("JWT_AUDIENCE", "api-gateway"),
+		CSRFCookieName:          getEnv("CSRF_COOKIE_NAME", "csrf_token"),
+		CSRFHeaderName:          getEnv("CSRF_HEADER_NAME", "X-CSRF-Token"),
 		AllowedOrigins:          getEnv("ALLOWED_ORIGINS", "http://localhost:3000"),
 		RedisHost:               getEnv("REDIS_HOST", "localhost"),
 		RedisPort:               getEnv("REDIS_PORT", "6379"),
@@ -43,4 +54,18 @@ func getEnv(key, fallback string) string {
 		return v
 	}
 	return fallback
+}
+
+func getCSVEnv(key, fallback string) []string {
+	value := getEnv(key, fallback)
+	parts := strings.Split(value, ",")
+	result := make([]string, 0, len(parts))
+	for _, part := range parts {
+		part = strings.TrimSpace(part)
+		if part == "" {
+			continue
+		}
+		result = append(result, part)
+	}
+	return result
 }

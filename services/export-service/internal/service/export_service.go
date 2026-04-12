@@ -105,14 +105,14 @@ func (s *ExportService) exportReports(ctx context.Context, schema string) (strin
 		return "", err
 	}
 	type row struct {
-		ReportID      string    `json:"report_id"`
-		InspectionID  string    `json:"inspection_id"`
-		ProjectName   string    `json:"project_name"`
-		Status        string    `json:"status"`
-		FileURL       string    `json:"file_url"`
-		ShareToken    string    `json:"share_token"`
-		ShareExpiry   *time.Time `json:"share_expiry,omitempty"`
-		CreatedAt     time.Time `json:"created_at"`
+		ReportID     string     `json:"report_id"`
+		InspectionID string     `json:"inspection_id"`
+		ProjectName  string     `json:"project_name"`
+		Status       string     `json:"status"`
+		FileURL      string     `json:"file_url"`
+		ShareToken   string     `json:"share_token"`
+		ShareExpiry  *time.Time `json:"share_expiry,omitempty"`
+		CreatedAt    time.Time  `json:"created_at"`
 	}
 	var rows []row
 	query := `
@@ -139,16 +139,16 @@ func (s *ExportService) exportMedia(ctx context.Context, schema string) (string,
 		return "", err
 	}
 	type row struct {
-		MediaID       string     `json:"media_id"`
-		InspectionID  string     `json:"inspection_id"`
-		ProjectName   string     `json:"project_name"`
-		URL           string     `json:"url"`
-		Filename      string     `json:"filename"`
-		MimeType      string     `json:"mime_type"`
-		CapturedVia   string     `json:"captured_via"`
-		Latitude      *float64   `json:"latitude,omitempty"`
-		Longitude     *float64   `json:"longitude,omitempty"`
-		CapturedAt    time.Time  `json:"captured_at"`
+		MediaID      string    `json:"media_id"`
+		InspectionID string    `json:"inspection_id"`
+		ProjectName  string    `json:"project_name"`
+		URL          string    `json:"url"`
+		Filename     string    `json:"filename"`
+		MimeType     string    `json:"mime_type"`
+		CapturedVia  string    `json:"captured_via"`
+		Latitude     *float64  `json:"latitude,omitempty"`
+		Longitude    *float64  `json:"longitude,omitempty"`
+		CapturedAt   time.Time `json:"captured_at"`
 	}
 	var rows []row
 	query := `

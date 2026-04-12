@@ -16,10 +16,10 @@ import (
 	"github.com/ecocomply/auth-service/internal/repository/cache"
 	irepository "github.com/ecocomply/auth-service/internal/repository/interface"
 	"github.com/ecocomply/auth-service/internal/repository/postgres"
+	"github.com/ecocomply/auth-service/internal/security"
 	sharedjwt "github.com/ecocomply/shared/pkg/jwt"
 	sharedpostgres "github.com/ecocomply/shared/pkg/postgres"
 	"github.com/google/uuid"
-	"golang.org/x/crypto/bcrypt"
 	"gorm.io/gorm"
 )
 
@@ -32,6 +32,7 @@ type AuthService struct {
 	jwt                *sharedjwt.Manager
 	notificationClient *NotificationClient
 	appBaseURL         string
+	refreshTokenTTL    time.Duration
 }
 
 func NewAuthService(
@@ -43,6 +44,7 @@ func NewAuthService(
 	jwt *sharedjwt.Manager,
 	notificationClient *NotificationClient,
 	appBaseURL string,
+	refreshTokenTTL time.Duration,
 ) *AuthService {
 	return &AuthService{
 		db:                 db,
@@ -53,6 +55,7 @@ func NewAuthService(
 		jwt:                jwt,
 		notificationClient: notificationClient,
 		appBaseURL:         appBaseURL,
+		refreshTokenTTL:    refreshTokenTTL,
 	}
 }
 
@@ -81,7 +84,7 @@ func (s *AuthService) RegisterOrg(ctx context.Context, req request.RegisterOrgRe
 		return nil, fmt.Errorf("schema provisioning failed: %w", err)
 	}
 
-	hash, err := bcrypt.GenerateFromPassword([]byte(req.Password), bcrypt.DefaultCost)
+	hash, err := security.HashPassword(req.Password)
 	if err != nil {
 		return nil, err
 	}
@@ -89,7 +92,7 @@ func (s *AuthService) RegisterOrg(ctx context.Context, req request.RegisterOrgRe
 	admin := &domain.User{
 		Name:               req.Name,
 		Email:              req.Email,
-		PasswordHash:       string(hash),
+		PasswordHash:       hash,
 		Role:               domain.RoleOrgAdmin,
 		IsActive:           true,
 		MustChangePassword: false,
@@ -132,8 +135,15 @@ func (s *AuthService) Login(ctx context.Context, orgID uuid.UUID, req request.Lo
 			return domain.ErrAccountInactive
 		}
 
-		if err := bcrypt.CompareHashAndPassword([]byte(user.PasswordHash), []byte(req.Password)); err != nil {
+		validPassword, upgradedHash, err := security.VerifyAndUpgrade(user.PasswordHash, req.Password)
+		if err != nil {
 			return domain.ErrInvalidCredentials
+		}
+		if !validPassword {
+			return domain.ErrInvalidCredentials
+		}
+		if upgradedHash != "" {
+			user.PasswordHash = upgradedHash
 		}
 
 		tokens, err := s.issueTokenPair(tenantCtx, user, org, tdb)
@@ -203,10 +213,22 @@ func (s *AuthService) RefreshToken(ctx context.Context, rawToken string) (*respo
 	return tokens, nil
 }
 
-func (s *AuthService) Logout(ctx context.Context, tokenID string, rawRefreshToken string, ttl time.Duration) error {
-	_ = s.tokenCache.BlacklistToken(ctx, tokenID, ttl)
+func (s *AuthService) Logout(ctx context.Context, tokenID string, accessTokenExpiresAt time.Time, rawRefreshToken, orgSchema string) error {
+	if tokenID != "" {
+		ttl := time.Until(accessTokenExpiresAt)
+		if ttl > 0 {
+			_ = s.tokenCache.BlacklistToken(ctx, tokenID, ttl)
+		}
+	}
+
 	if rawRefreshToken != "" {
-		_ = s.tokenCache.DeleteRefreshTokenContext(ctx, hashToken(rawRefreshToken))
+		refreshHash := hashToken(rawRefreshToken)
+		_ = s.tokenCache.DeleteRefreshTokenContext(ctx, refreshHash)
+		if orgSchema != "" {
+			_ = withTenantTx(ctx, s.db, orgSchema, func(tenantCtx context.Context, tdb *gorm.DB) error {
+				return postgres.NewTokenRepository(tdb).RevokeRefreshToken(tenantCtx, refreshHash)
+			})
+		}
 	}
 	return nil
 }
@@ -214,7 +236,7 @@ func (s *AuthService) Logout(ctx context.Context, tokenID string, rawRefreshToke
 func (s *AuthService) InviteUser(ctx context.Context, inviterID uuid.UUID, orgSchema string, orgName string, req request.InviteUserRequest) (*response.UserResponse, error) {
 	// Generate readable temp password: 12 chars
 	rawTemp := generateReadablePassword()
-	hash, err := bcrypt.GenerateFromPassword([]byte(rawTemp), bcrypt.DefaultCost)
+	hash, err := security.HashPassword(rawTemp)
 	if err != nil {
 		return nil, err
 	}
@@ -222,7 +244,7 @@ func (s *AuthService) InviteUser(ctx context.Context, inviterID uuid.UUID, orgSc
 	user := &domain.User{
 		Name:               req.Name,
 		Email:              req.Email,
-		PasswordHash:       string(hash),
+		PasswordHash:       hash,
 		Role:               domain.Role(req.Role),
 		IsActive:           true,
 		MustChangePassword: true, // force password change on first login
@@ -339,14 +361,15 @@ func (s *AuthService) ChangePassword(ctx context.Context, userID uuid.UUID, orgS
 		if err != nil {
 			return err
 		}
-		if err := bcrypt.CompareHashAndPassword([]byte(user.PasswordHash), []byte(req.CurrentPassword)); err != nil {
+		validPassword, _, err := security.VerifyAndUpgrade(user.PasswordHash, req.CurrentPassword)
+		if err != nil || !validPassword {
 			return domain.ErrInvalidCredentials
 		}
-		hash, err := bcrypt.GenerateFromPassword([]byte(req.NewPassword), bcrypt.DefaultCost)
+		hash, err := security.HashPassword(req.NewPassword)
 		if err != nil {
 			return err
 		}
-		user.PasswordHash = string(hash)
+		user.PasswordHash = hash
 		user.MustChangePassword = false // clear the flag after password change
 		return tenantUserRepo.Update(tenantCtx, user)
 	})
@@ -442,11 +465,11 @@ func (s *AuthService) ResetPassword(ctx context.Context, req request.ResetPasswo
 			return err
 		}
 
-		hash, err := bcrypt.GenerateFromPassword([]byte(req.NewPassword), bcrypt.DefaultCost)
+		hash, err := security.HashPassword(req.NewPassword)
 		if err != nil {
 			return err
 		}
-		user.PasswordHash = string(hash)
+		user.PasswordHash = hash
 		user.MustChangePassword = false
 		if err := tenantUserRepo.Update(tenantCtx, user); err != nil {
 			return err
@@ -466,18 +489,19 @@ func (s *AuthService) issueTokenPair(ctx context.Context, user *domain.User, org
 
 	rawRefresh := generateToken(32)
 	refreshHash := hashToken(rawRefresh)
-	refreshExpiry := time.Now().Add(7 * 24 * time.Hour)
+	refreshExpiry := time.Now().Add(s.refreshTokenTTL)
+	accessExpiry := time.Now().Add(s.jwt.AccessTTL())
 
 	tenantTokenRepo := postgres.NewTokenRepository(tdb)
 	if err := tenantTokenRepo.SaveRefreshToken(ctx, user.ID, refreshHash, refreshExpiry); err != nil {
 		return nil, err
 	}
-	_ = s.tokenCache.CacheRefreshTokenContext(ctx, refreshHash, org.ID.String(), org.SchemaName, 7*24*time.Hour)
+	_ = s.tokenCache.CacheRefreshTokenContext(ctx, refreshHash, org.ID.String(), org.SchemaName, s.refreshTokenTTL)
 
 	return &response.TokenPair{
 		AccessToken:  accessToken,
 		RefreshToken: rawRefresh,
-		ExpiresAt:    refreshExpiry.Unix(),
+		ExpiresAt:    accessExpiry.Unix(),
 	}, nil
 }
 

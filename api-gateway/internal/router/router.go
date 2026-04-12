@@ -18,6 +18,7 @@ func New(c *di.Container) *gin.Engine {
 	r.Use(middleware.Logger())
 	r.Use(middleware.CORS(strings.Split(c.Config.AllowedOrigins, ",")))
 	r.Use(middleware.DefaultRateLimit(c.Redis))
+	r.Use(middleware.CSRFMiddleware(c.Config.CSRFCookieName, c.Config.CSRFHeaderName))
 
 	// Health check
 	r.GET("/health", func(ctx *gin.Context) {
@@ -31,29 +32,29 @@ func New(c *di.Container) *gin.Engine {
 		auth.Use(middleware.StrictRateLimit(c.Redis))
 		{
 			// These routes are public — no JWT required
-			auth.POST("/register",       c.AuthProxy.Handler())
-			auth.POST("/login",          c.AuthProxy.Handler())
-			auth.POST("/refresh",        c.AuthProxy.Handler())
-			auth.POST("/forgot-password",c.AuthProxy.Handler())
+			auth.POST("/register", c.AuthProxy.Handler())
+			auth.POST("/login", c.AuthProxy.Handler())
+			auth.POST("/refresh", c.AuthProxy.Handler())
+			auth.POST("/forgot-password", c.AuthProxy.Handler())
 			auth.POST("/reset-password", c.AuthProxy.Handler())
 
 			// Protected auth routes
 			authProtected := auth.Group("")
-			authProtected.Use(middleware.ValidateJWT(c.Config.JWTSecret, c.Redis))
+			authProtected.Use(middleware.ValidateJWT(c.JWTManager, c.Redis))
 			{
-				authProtected.POST("/logout",             c.AuthProxy.Handler())
-				authProtected.GET("/profile",             c.AuthProxy.Handler())
-				authProtected.PATCH("/profile",           c.AuthProxy.Handler())
-				authProtected.PATCH("/profile/password",  c.AuthProxy.Handler())
-				authProtected.GET("/users",               c.AuthProxy.Handler())
-				authProtected.POST("/users/invite",       c.AuthProxy.Handler())
-				authProtected.PATCH("/users/:id/role",    c.AuthProxy.Handler())
+				authProtected.POST("/logout", c.AuthProxy.Handler())
+				authProtected.GET("/profile", c.AuthProxy.Handler())
+				authProtected.PATCH("/profile", c.AuthProxy.Handler())
+				authProtected.PATCH("/profile/password", c.AuthProxy.Handler())
+				authProtected.GET("/users", c.AuthProxy.Handler())
+				authProtected.POST("/users/invite", c.AuthProxy.Handler())
+				authProtected.PATCH("/users/:id/role", c.AuthProxy.Handler())
 			}
 		}
 
 		// ── All other services — JWT required ─────────────────────────────────
 		protected := v1.Group("")
-		protected.Use(middleware.ValidateJWT(c.Config.JWTSecret, c.Redis))
+		protected.Use(middleware.ValidateJWT(c.JWTManager, c.Redis))
 		{
 			// Inspections
 			protected.Any("/inspections/*path", c.InspectionProxy.Handler())
@@ -66,7 +67,7 @@ func New(c *di.Container) *gin.Engine {
 				path := ctx.Param("path")
 				// /reports/share/:token is public — skip JWT
 				if len(path) > 7 && path[:7] == "/share/" {
-					middleware.OptionalJWT(c.Config.JWTSecret)(ctx)
+					middleware.OptionalJWT(c.JWTManager)(ctx)
 				}
 				c.ReportProxy.Handler()(ctx)
 			})

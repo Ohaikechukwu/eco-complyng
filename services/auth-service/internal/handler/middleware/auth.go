@@ -9,12 +9,14 @@ import (
 )
 
 const (
-	ContextUserID    = "user_id"
-	ContextUserName  = "user_name"
-	ContextOrgID     = "org_id"
-	ContextOrgName   = "org_name"
-	ContextOrgSchema = "org_schema"
-	ContextRole      = "role"
+	ContextUserID      = "user_id"
+	ContextUserName    = "user_name"
+	ContextOrgID       = "org_id"
+	ContextOrgName     = "org_name"
+	ContextOrgSchema   = "org_schema"
+	ContextRole        = "role"
+	ContextTokenID     = "token_id"
+	ContextTokenExpiry = "token_expiry"
 )
 
 func Auth(jwtManager *sharedjwt.Manager) gin.HandlerFunc {
@@ -32,9 +34,16 @@ func Auth(jwtManager *sharedjwt.Manager) gin.HandlerFunc {
 			return
 		}
 		c.Set(ContextUserID, claims.UserID)
+		c.Set(ContextUserName, claims.Name)
 		c.Set(ContextOrgID, claims.OrgID)
 		c.Set(ContextOrgSchema, claims.OrgSchema)
 		c.Set(ContextRole, claims.Role)
+		if claims.ID != "" {
+			c.Set(ContextTokenID, claims.ID)
+		}
+		if claims.ExpiresAt != nil {
+			c.Set(ContextTokenExpiry, claims.ExpiresAt.Time.UTC())
+		}
 		c.Next()
 	}
 }

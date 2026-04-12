@@ -3,6 +3,7 @@ package config
 import (
 	"os"
 	"strconv"
+	"strings"
 )
 
 type Config struct {
@@ -18,6 +19,8 @@ type Config struct {
 	RedisPort    string
 	RedisPass    string
 	JWTSecret    string
+	JWTIssuer    string
+	JWTAudiences []string
 	JWTExpiryHrs int
 }
 
@@ -36,6 +39,8 @@ func Load() *Config {
 		RedisPort:    getEnv("REDIS_PORT", "6379"),
 		RedisPass:    getEnv("REDIS_PASS", ""),
 		JWTSecret:    getEnv("JWT_SECRET", "change-me"),
+		JWTIssuer:    getEnv("JWT_ISSUER", "auth.ecocomply.ng"),
+		JWTAudiences: getCSVEnv("JWT_AUDIENCE", "inspection-service"),
 		JWTExpiryHrs: expiry,
 	}
 }
@@ -45,4 +50,18 @@ func getEnv(key, fallback string) string {
 		return v
 	}
 	return fallback
+}
+
+func getCSVEnv(key, fallback string) []string {
+	value := getEnv(key, fallback)
+	parts := strings.Split(value, ",")
+	result := make([]string, 0, len(parts))
+	for _, part := range parts {
+		part = strings.TrimSpace(part)
+		if part == "" {
+			continue
+		}
+		result = append(result, part)
+	}
+	return result
 }

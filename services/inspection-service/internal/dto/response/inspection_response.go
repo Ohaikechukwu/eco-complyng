@@ -142,10 +142,10 @@ type AnalyticsCompareResponse struct {
 }
 
 type AnalyticsSnapshot struct {
-	From         time.Time         `json:"from"`
-	To           time.Time         `json:"to"`
-	StatusCounts map[string]int64  `json:"status_counts"`
-	Total        int64             `json:"total"`
+	From         time.Time        `json:"from"`
+	To           time.Time        `json:"to"`
+	StatusCounts map[string]int64 `json:"status_counts"`
+	Total        int64            `json:"total"`
 }
 
 type GeoJSONResponse struct {

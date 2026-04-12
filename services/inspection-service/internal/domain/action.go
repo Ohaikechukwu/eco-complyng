@@ -50,10 +50,10 @@ const (
 	ReviewStageSupervisor ReviewStage = "supervisor"
 	ReviewStageManager    ReviewStage = "manager"
 
-	ReviewOpen     ReviewStatus = "open"
+	ReviewOpen      ReviewStatus = "open"
 	ReviewAddressed ReviewStatus = "addressed"
-	ReviewApproved ReviewStatus = "approved"
-	ReviewRejected ReviewStatus = "rejected"
+	ReviewApproved  ReviewStatus = "approved"
+	ReviewRejected  ReviewStatus = "rejected"
 )
 
 type InspectionReview struct {

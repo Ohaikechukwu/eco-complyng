@@ -21,7 +21,7 @@ func New(c *di.Container) *gin.Engine {
 		ctx.JSON(200, gin.H{"status": "ok", "service": "auth-service"})
 	})
 
-	authHandler := handler.NewAuthHandler(c.AuthService)
+	authHandler := handler.NewAuthHandler(c.AuthService, c.CookieConfig)
 
 	v1 := r.Group("/api/v1/auth")
 	{

@@ -48,7 +48,9 @@ func NewContainer(cfg *config.Config) (*Container, error) {
 		return nil, fmt.Errorf("redis: %w", err)
 	}
 
-	jwtManager := sharedjwt.NewManager(cfg.JWTSecret, cfg.JWTExpiryHrs)
+	jwtManager := sharedjwt.NewManager(cfg.JWTSecret, cfg.JWTExpiryHrs).
+		WithIssuer(cfg.JWTIssuer).
+		WithAudience(cfg.JWTAudiences...)
 
 	cloudinaryClient, err := sharedcloudinary.NewClient(sharedcloudinary.Config{
 		CloudName: cfg.CloudinaryCloudName,

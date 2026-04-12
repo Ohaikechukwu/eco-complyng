@@ -4,8 +4,8 @@ import (
 	"context"
 	"strings"
 
-	irepository "github.com/ecocomply/auth-service/internal/repository/interface"
 	"github.com/ecocomply/auth-service/internal/repository/cache"
+	irepository "github.com/ecocomply/auth-service/internal/repository/interface"
 	"github.com/ecocomply/shared/pkg/response"
 	"github.com/gin-gonic/gin"
 	"github.com/gin-gonic/gin/binding"

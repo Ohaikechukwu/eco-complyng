@@ -3,6 +3,8 @@ package config
 import (
 	"os"
 	"strconv"
+	"strings"
+	"time"
 )
 
 type Config struct {
@@ -18,13 +20,22 @@ type Config struct {
 	RedisPort              string
 	RedisPass              string
 	JWTSecret              string
+	JWTIssuer              string
+	JWTAudiences           []string
 	JWTExpiryHrs           int
+	AccessTokenTTL         time.Duration
+	RefreshTokenTTL        time.Duration
 	NotificationServiceURL string
 	AppBaseURL             string
+	CookieDomain           string
+	CookieSecure           bool
+	CookieSameSite         string
 }
 
 func Load() *Config {
 	expiry, _ := strconv.Atoi(getEnv("JWT_EXPIRY_HOURS", "24"))
+	accessTTLMinutes, _ := strconv.Atoi(getEnv("ACCESS_TOKEN_TTL_MINUTES", "15"))
+	refreshTTLDays, _ := strconv.Atoi(getEnv("REFRESH_TOKEN_TTL_DAYS", "14"))
 	return &Config{
 		Env:                    getEnv("ENV", "development"),
 		Port:                   getEnv("PORT", "8081"),
@@ -38,9 +49,16 @@ func Load() *Config {
 		RedisPort:              getEnv("REDIS_PORT", "6379"),
 		RedisPass:              getEnv("REDIS_PASS", ""),
 		JWTSecret:              getEnv("JWT_SECRET", "change-me"),
+		JWTIssuer:              getEnv("JWT_ISSUER", "auth.ecocomply.ng"),
+		JWTAudiences:           getCSVEnv("JWT_AUDIENCE", "api-gateway,auth-service,inspection-service,media-service,report-service,collaboration-service,notification-service,export-service"),
 		JWTExpiryHrs:           expiry,
+		AccessTokenTTL:         time.Duration(accessTTLMinutes) * time.Minute,
+		RefreshTokenTTL:        time.Duration(refreshTTLDays) * 24 * time.Hour,
 		NotificationServiceURL: getEnv("NOTIFICATION_SERVICE_URL", "http://notification-service:8086"),
 		AppBaseURL:             getEnv("APP_BASE_URL", "http://localhost:3000"),
+		CookieDomain:           getEnv("COOKIE_DOMAIN", ""),
+		CookieSecure:           getBoolEnv("COOKIE_SECURE", getEnv("ENV", "development") == "production"),
+		CookieSameSite:         getEnv("COOKIE_SAMESITE", "Lax"),
 	}
 }
 
@@ -49,4 +67,31 @@ func getEnv(key, fallback string) string {
 		return v
 	}
 	return fallback
+}
+
+func getBoolEnv(key string, fallback bool) bool {
+	value := strings.TrimSpace(os.Getenv(key))
+	if value == "" {
+		return fallback
+	}
+
+	parsed, err := strconv.ParseBool(value)
+	if err != nil {
+		return fallback
+	}
+	return parsed
+}
+
+func getCSVEnv(key, fallback string) []string {
+	value := getEnv(key, fallback)
+	parts := strings.Split(value, ",")
+	result := make([]string, 0, len(parts))
+	for _, part := range parts {
+		part = strings.TrimSpace(part)
+		if part == "" {
+			continue
+		}
+		result = append(result, part)
+	}
+	return result
 }

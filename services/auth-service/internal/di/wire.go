@@ -4,6 +4,7 @@ import (
 	"fmt"
 
 	"github.com/ecocomply/auth-service/internal/config"
+	"github.com/ecocomply/auth-service/internal/handler"
 	"github.com/ecocomply/auth-service/internal/repository/cache"
 	irepository "github.com/ecocomply/auth-service/internal/repository/interface"
 	"github.com/ecocomply/auth-service/internal/repository/postgres"
@@ -26,7 +27,8 @@ type Container struct {
 	OrgRepo   irepository.OrgRepository
 	TokenRepo irepository.TokenRepository
 
-	AuthService *service.AuthService
+	AuthService  *service.AuthService
+	CookieConfig handler.CookieConfig
 }
 
 func NewContainer(cfg *config.Config) (*Container, error) {
@@ -52,7 +54,10 @@ func NewContainer(cfg *config.Config) (*Container, error) {
 		return nil, fmt.Errorf("redis: %w", err)
 	}
 
-	jwtManager := sharedjwt.NewManager(cfg.JWTSecret, cfg.JWTExpiryHrs)
+	jwtManager := sharedjwt.NewManager(cfg.JWTSecret, cfg.JWTExpiryHrs).
+		WithIssuer(cfg.JWTIssuer).
+		WithAudience(cfg.JWTAudiences...).
+		WithAccessTTL(cfg.AccessTokenTTL)
 	tokenCache := cache.NewTokenCache(rdb)
 	notificationClient := service.NewNotificationClient(cfg.NotificationServiceURL)
 
@@ -66,17 +71,33 @@ func NewContainer(cfg *config.Config) (*Container, error) {
 		tokenCache, jwtManager,
 		notificationClient,
 		cfg.AppBaseURL,
+		cfg.RefreshTokenTTL,
 	)
 
+	cookieConfig := handler.CookieConfig{
+		Domain:            cfg.CookieDomain,
+		Secure:            cfg.CookieSecure,
+		SameSite:          handler.ParseSameSite(cfg.CookieSameSite),
+		AccessCookieName:  "access_token",
+		RefreshCookieName: "refresh_token",
+		CSRFCookieName:    "csrf_token",
+		AccessCookiePath:  "/api/v1",
+		RefreshCookiePath: "/api/v1/auth/refresh",
+		CSRFCookiePath:    "/api/v1",
+		AccessMaxAge:      cfg.AccessTokenTTL,
+		RefreshMaxAge:     cfg.RefreshTokenTTL,
+	}
+
 	return &Container{
-		Config:      cfg,
-		DB:          db,
-		Redis:       rdb,
-		JWTManager:  jwtManager,
-		TokenCache:  tokenCache,
-		UserRepo:    userRepo,
-		OrgRepo:     orgRepo,
-		TokenRepo:   tokenRepo,
-		AuthService: authSvc,
+		Config:       cfg,
+		DB:           db,
+		Redis:        rdb,
+		JWTManager:   jwtManager,
+		TokenCache:   tokenCache,
+		UserRepo:     userRepo,
+		OrgRepo:      orgRepo,
+		TokenRepo:    tokenRepo,
+		AuthService:  authSvc,
+		CookieConfig: cookieConfig,
 	}, nil
 }

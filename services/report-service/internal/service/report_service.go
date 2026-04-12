@@ -203,14 +203,14 @@ func (s *ReportService) GetByShareToken(ctx context.Context, token string) (*res
 
 func buildReportData(reportID string, i *client.InspectionData, media []client.MediaData) pdf.ReportData {
 	data := pdf.ReportData{
-		ReportID:          reportID,
-		ProjectName:       i.ProjectName,
-		Location:          i.LocationName,
-		Date:              i.Date.Format("02 Jan 2006"),
-		InspectorName:     i.InspectorName,
-		InspectorRole:     i.InspectorRole,
-		Status:            i.Status,
-		GeneratedAt:       time.Now().Format("02 Jan 2006 15:04"),
+		ReportID:      reportID,
+		ProjectName:   i.ProjectName,
+		Location:      i.LocationName,
+		Date:          i.Date.Format("02 Jan 2006"),
+		InspectorName: i.InspectorName,
+		InspectorRole: i.InspectorRole,
+		Status:        i.Status,
+		GeneratedAt:   time.Now().Format("02 Jan 2006 15:04"),
 	}
 
 	for _, item := range i.ChecklistItems {

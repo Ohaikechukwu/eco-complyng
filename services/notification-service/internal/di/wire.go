@@ -38,7 +38,9 @@ func NewContainer(cfg *config.Config) (*Container, error) {
 	if err != nil {
 		return nil, fmt.Errorf("redis: %w", err)
 	}
-	jwtManager := sharedjwt.NewManager(cfg.JWTSecret, cfg.JWTExpiryHrs)
+	jwtManager := sharedjwt.NewManager(cfg.JWTSecret, cfg.JWTExpiryHrs).
+		WithIssuer(cfg.JWTIssuer).
+		WithAudience(cfg.JWTAudiences...)
 	sender := email.NewSender(email.Config{
 		SMTPHost:     cfg.SMTPHost,
 		SMTPPort:     cfg.SMTPPort,
