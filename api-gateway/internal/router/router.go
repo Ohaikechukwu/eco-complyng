@@ -14,6 +14,7 @@ func New(c *di.Container) *gin.Engine {
 	}
 
 	r := gin.New()
+	r.RedirectTrailingSlash = false
 	r.Use(gin.Recovery())
 	r.Use(middleware.Logger())
 	r.Use(middleware.CORS(strings.Split(c.Config.AllowedOrigins, ",")))
@@ -58,9 +59,11 @@ func New(c *di.Container) *gin.Engine {
 		{
 			// Inspections
 			protected.Any("/inspections/*path", c.InspectionProxy.Handler())
+			protected.Any("/inspections", c.InspectionProxy.Handler())
 
 			// Media
 			protected.Any("/media/*path", c.MediaProxy.Handler())
+			protected.Any("/media", c.MediaProxy.Handler())
 
 			// Reports — public share endpoint does not need JWT
 			protected.Any("/reports/*path", func(ctx *gin.Context) {
@@ -74,12 +77,15 @@ func New(c *di.Container) *gin.Engine {
 
 			// Collaboration (WebSocket upgrade)
 			protected.Any("/collaborate/*path", c.CollaborationProxy.Handler())
+			protected.Any("/collaborate", c.CollaborationProxy.Handler())
 
 			// Notifications
 			protected.Any("/notifications/*path", c.NotificationProxy.Handler())
+			protected.Any("/notifications", c.NotificationProxy.Handler())
 
 			// Exports
 			protected.Any("/exports/*path", c.ExportProxy.Handler())
+			protected.Any("/exports", c.ExportProxy.Handler())
 		}
 	}
 

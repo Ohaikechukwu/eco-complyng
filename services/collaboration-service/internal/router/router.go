@@ -12,6 +12,7 @@ func New(c *di.Container) *gin.Engine {
 		gin.SetMode(gin.ReleaseMode)
 	}
 	r := gin.New()
+	r.RedirectTrailingSlash = false
 	r.Use(gin.Recovery())
 	r.Use(middleware.Logger())
 
