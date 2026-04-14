@@ -3,7 +3,10 @@ package handler
 import (
 	"crypto/rand"
 	"encoding/hex"
+	"net"
 	"net/http"
+	"net/url"
+	"strings"
 	"time"
 
 	"github.com/ecocomply/auth-service/internal/domain"
@@ -236,6 +239,8 @@ func (h *AuthHandler) ListUsers(c *gin.Context) {
 }
 
 func (h *AuthHandler) setAuthCookies(c *gin.Context, accessToken, refreshToken string) {
+	secure, sameSite := h.resolveCookiePolicy(c)
+
 	http.SetCookie(c.Writer, &http.Cookie{
 		Name:     h.cookieConfig.AccessCookieName,
 		Value:    accessToken,
@@ -243,8 +248,8 @@ func (h *AuthHandler) setAuthCookies(c *gin.Context, accessToken, refreshToken s
 		Domain:   h.cookieConfig.Domain,
 		MaxAge:   int(h.cookieConfig.AccessMaxAge.Seconds()),
 		HttpOnly: true,
-		Secure:   h.cookieConfig.Secure,
-		SameSite: h.cookieConfig.SameSite,
+		Secure:   secure,
+		SameSite: sameSite,
 	})
 	http.SetCookie(c.Writer, &http.Cookie{
 		Name:     h.cookieConfig.RefreshCookieName,
@@ -253,8 +258,8 @@ func (h *AuthHandler) setAuthCookies(c *gin.Context, accessToken, refreshToken s
 		Domain:   h.cookieConfig.Domain,
 		MaxAge:   int(h.cookieConfig.RefreshMaxAge.Seconds()),
 		HttpOnly: true,
-		Secure:   h.cookieConfig.Secure,
-		SameSite: h.cookieConfig.SameSite,
+		Secure:   secure,
+		SameSite: sameSite,
 	})
 	http.SetCookie(c.Writer, &http.Cookie{
 		Name:     h.cookieConfig.CSRFCookieName,
@@ -263,8 +268,8 @@ func (h *AuthHandler) setAuthCookies(c *gin.Context, accessToken, refreshToken s
 		Domain:   h.cookieConfig.Domain,
 		MaxAge:   int(h.cookieConfig.RefreshMaxAge.Seconds()),
 		HttpOnly: false,
-		Secure:   h.cookieConfig.Secure,
-		SameSite: h.cookieConfig.SameSite,
+		Secure:   secure,
+		SameSite: sameSite,
 	})
 }
 
@@ -277,6 +282,8 @@ func generateCSRFToken() string {
 }
 
 func (h *AuthHandler) clearAuthCookies(c *gin.Context) {
+	secure, sameSite := h.resolveCookiePolicy(c)
+
 	http.SetCookie(c.Writer, &http.Cookie{
 		Name:     h.cookieConfig.AccessCookieName,
 		Value:    "",
@@ -284,8 +291,8 @@ func (h *AuthHandler) clearAuthCookies(c *gin.Context) {
 		Domain:   h.cookieConfig.Domain,
 		MaxAge:   -1,
 		HttpOnly: true,
-		Secure:   h.cookieConfig.Secure,
-		SameSite: h.cookieConfig.SameSite,
+		Secure:   secure,
+		SameSite: sameSite,
 	})
 	http.SetCookie(c.Writer, &http.Cookie{
 		Name:     h.cookieConfig.RefreshCookieName,
@@ -294,8 +301,8 @@ func (h *AuthHandler) clearAuthCookies(c *gin.Context) {
 		Domain:   h.cookieConfig.Domain,
 		MaxAge:   -1,
 		HttpOnly: true,
-		Secure:   h.cookieConfig.Secure,
-		SameSite: h.cookieConfig.SameSite,
+		Secure:   secure,
+		SameSite: sameSite,
 	})
 	http.SetCookie(c.Writer, &http.Cookie{
 		Name:     h.cookieConfig.CSRFCookieName,
@@ -304,9 +311,67 @@ func (h *AuthHandler) clearAuthCookies(c *gin.Context) {
 		Domain:   h.cookieConfig.Domain,
 		MaxAge:   -1,
 		HttpOnly: false,
-		Secure:   h.cookieConfig.Secure,
-		SameSite: h.cookieConfig.SameSite,
+		Secure:   secure,
+		SameSite: sameSite,
 	})
+}
+
+func (h *AuthHandler) resolveCookiePolicy(c *gin.Context) (bool, http.SameSite) {
+	secure := h.cookieConfig.Secure || requestIsHTTPS(c)
+	sameSite := h.cookieConfig.SameSite
+
+	if requestIsCrossOrigin(c) {
+		// Cross-origin XHR/fetch requests need SameSite=None and Secure for browsers
+		// to store and send auth cookies consistently.
+		sameSite = http.SameSiteNoneMode
+		secure = true
+	}
+
+	return secure, sameSite
+}
+
+func requestIsHTTPS(c *gin.Context) bool {
+	if c.Request.TLS != nil {
+		return true
+	}
+
+	if strings.EqualFold(strings.TrimSpace(c.GetHeader("X-Forwarded-Proto")), "https") {
+		return true
+	}
+
+	return strings.EqualFold(strings.TrimSpace(c.GetHeader("X-Forwarded-Ssl")), "on")
+}
+
+func requestIsCrossOrigin(c *gin.Context) bool {
+	originHeader := strings.TrimSpace(c.GetHeader("Origin"))
+	if originHeader == "" {
+		return false
+	}
+
+	originURL, err := url.Parse(originHeader)
+	if err != nil || originURL.Host == "" {
+		return false
+	}
+
+	requestHost := strings.TrimSpace(c.Request.Host)
+	if requestHost == "" {
+		requestHost = strings.TrimSpace(c.GetHeader("X-Forwarded-Host"))
+	}
+	if requestHost == "" {
+		return false
+	}
+
+	originHost := stripPort(originURL.Host)
+	currentHost := stripPort(requestHost)
+
+	return !strings.EqualFold(originHost, currentHost)
+}
+
+func stripPort(host string) string {
+	if parsedHost, _, err := net.SplitHostPort(host); err == nil {
+		return parsedHost
+	}
+	return host
 }
 
 func handleServiceError(c *gin.Context, err error) {
