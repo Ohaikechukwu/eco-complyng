@@ -321,6 +321,10 @@ func (h *AuthHandler) resolveCookiePolicy(c *gin.Context) (bool, http.SameSite) 
 	sameSite := h.cookieConfig.SameSite
 
 	if requestIsCrossOrigin(c) {
+		if isLocalDevRequest(c) {
+			return secure, sameSite
+		}
+
 		// Cross-origin XHR/fetch requests need SameSite=None and Secure for browsers
 		// to store and send auth cookies consistently.
 		sameSite = http.SameSiteNoneMode
@@ -372,6 +376,39 @@ func stripPort(host string) string {
 		return parsedHost
 	}
 	return host
+}
+
+func isLocalDevRequest(c *gin.Context) bool {
+	originHeader := strings.TrimSpace(c.GetHeader("Origin"))
+	if originHeader == "" {
+		return false
+	}
+
+	originURL, err := url.Parse(originHeader)
+	if err != nil {
+		return false
+	}
+
+	requestHost := strings.TrimSpace(c.Request.Host)
+	if requestHost == "" {
+		requestHost = strings.TrimSpace(c.GetHeader("X-Forwarded-Host"))
+	}
+	if requestHost == "" {
+		return false
+	}
+
+	return isLoopbackHost(stripPort(originURL.Host)) && isLoopbackHost(stripPort(requestHost)) && !requestIsHTTPS(c)
+}
+
+func isLoopbackHost(host string) bool {
+	normalized := strings.TrimSpace(strings.ToLower(host))
+	switch normalized {
+	case "localhost", "127.0.0.1", "::1":
+		return true
+	}
+
+	ip := net.ParseIP(normalized)
+	return ip != nil && ip.IsLoopback()
 }
 
 func handleServiceError(c *gin.Context, err error) {
