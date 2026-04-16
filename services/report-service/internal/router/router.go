@@ -16,6 +16,7 @@ func New(c *di.Container) *gin.Engine {
 	r.RedirectTrailingSlash = false
 	r.Use(gin.Recovery())
 	r.Use(middleware.Logger())
+	r.Use(middleware.CORS())
 
 	r.GET("/health", func(ctx *gin.Context) {
 		ctx.JSON(200, gin.H{"status": "ok", "service": "report-service"})

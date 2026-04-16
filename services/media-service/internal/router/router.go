@@ -16,6 +16,7 @@ func New(c *di.Container) *gin.Engine {
 	r.RedirectTrailingSlash = false
 	r.Use(gin.Recovery())
 	r.Use(middleware.Logger())
+	r.Use(middleware.CORS())
 
 	// Increase max multipart memory to 20MB
 	r.MaxMultipartMemory = 20 << 20

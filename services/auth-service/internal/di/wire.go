@@ -82,7 +82,7 @@ func NewContainer(cfg *config.Config) (*Container, error) {
 		RefreshCookieName: "refresh_token",
 		CSRFCookieName:    "csrf_token",
 		AccessCookiePath:  "/api/v1",
-		RefreshCookiePath: "/api/v1/auth/refresh",
+		RefreshCookiePath: "/api/v1/auth",
 		CSRFCookiePath:    "/api/v1",
 		AccessMaxAge:      cfg.AccessTokenTTL,
 		RefreshMaxAge:     cfg.RefreshTokenTTL,
